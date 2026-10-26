@@ -7,6 +7,8 @@ Victorian with a turret -- with warm lit windows and jack-o'-lanterns.
 Built in stages (see README). Stage 1: the still scene. Stage 2: the
 pumpkin-head kid and the ghost walking across, and figures in a window.
 Stage 3: ambient motion (stars, flicker, leaves, fog, ghost tricks).
+Stage 4: surprise moments (bats, trick-or-treat, bush scare, big gust,
+winking pumpkin, witch flyby), one at a time.
 
 How the houses are drawn: each house is described by a few numbers in HOUSES
 (where it is, how big, what it's made of, where the windows go). The code
@@ -18,6 +20,7 @@ in HOUSES to move or resize anything.
 Designed for a 128x32 display (two 64x32 panels side by side).
 """
 
+import bisect
 import math
 import os
 from functools import lru_cache
@@ -41,7 +44,8 @@ SKY = [(0, 0, 0)] * 9 + [
 MOON = (255, 235, 160)
 MOON_DARK = (220, 190, 110)
 STAR_COLOURS = [(230, 230, 230), (255, 210, 50), (0, 200, 180)]
-TEXT = (110, 255, 30)
+TEXT = (255, 120, 10)          # pumpkin orange
+TEXT_SHADOW = (90, 25, 0)      # dark ember shadow under the letters
 GRASS = (20, 120, 20)
 
 # Materials. Each pixel of a house is one of these.
@@ -427,24 +431,46 @@ def draw_tree(img):
 
 
 def draw_bushes(img):
-    draw = ImageDraw.Draw(img)
     for x, w in BUSHES:
+        draw_bush(img, x, w)
+
+
+def draw_bush(img, x, w):
+    draw = ImageDraw.Draw(img)
+    if True:
         draw.rectangle((x, GROUND_Y - 3, x + w - 1, GROUND_Y - 1), fill=BUSH["G"])
         draw.line((x + 1, GROUND_Y - 4, x + w - 2, GROUND_Y - 4), fill=BUSH["L"])
         draw.point((x + 2, GROUND_Y - 3), fill=BUSH["L"])
         draw.point((x + w - 3, GROUND_Y - 3), fill=BUSH["L"])
 
 
-def draw_pumpkins(img, t=None):
-    """Draw the jack-o'-lanterns. Given the time t, each candle flickers."""
+WINKING_JACK_O_LANTERN = [
+    "   g   ",
+    " OOOOO ",
+    "OOYOOOO",     # right eye shut
+    "OOOOOOO",
+    "OYYYYYO",
+    " OOOOO ",
+]
+WINKING_PUMPKIN = 1   # which of PUMPKINS winks (the big one by the cottage)
+
+
+def draw_pumpkins(img, t=None, wink=None):
+    """Draw the jack-o'-lanterns. Given the time t, each candle flickers.
+    wink is how far into a wink surprise we are (seconds), or None."""
     for i, (x, size) in enumerate(PUMPKINS):
         picture = BIG_JACK_O_LANTERN if size == "big" else JACK_O_LANTERN
+        flare = 1.0
+        if wink is not None and i == WINKING_PUMPKIN:
+            flare = 1.25
+            if 0.3 < wink < 0.7 or 1.1 < wink < 1.5:
+                picture = WINKING_JACK_O_LANTERN
         colours = PUMPKIN
         if t is not None:
             # Two wobbles at odd speeds, different for every pumpkin, so the
             # flicker never looks like a repeating pattern.
             wobble = 0.5 * math.sin(t * 9.1 + i * 1.7) + 0.5 * math.sin(t * 13.7 + i * 4.1)
-            glow = 0.78 + 0.22 * wobble
+            glow = (0.78 + 0.22 * wobble) * flare
             colours = dict(PUMPKIN, Y=_scale(PUMPKIN["Y"], glow),
                            O=_scale(PUMPKIN["O"], 0.92 + 0.08 * wobble))
         draw_sprite(img, picture, x, GROUND_Y - len(picture) + 1, colours)
@@ -465,6 +491,7 @@ def draw_countdown_text(img, text):
     draw = ImageDraw.Draw(img)
     draw.fontmode = "1"
     left, top, _, _ = TEXT_FONT.getbbox(text)
+    draw.text((2 - left, 2 - top), text, font=TEXT_FONT, fill=TEXT_SHADOW)
     draw.text((1 - left, 1 - top), text, font=TEXT_FONT, fill=TEXT)
 
 
@@ -495,7 +522,31 @@ KID_COLOURS = {
     "B": (200, 165, 105),   # paper candy bag
     "b": (150, 115, 65),    # bag shading
     "S": (90, 90, 100),     # shoes
+    # candy poking out of the bag
+    "r": (255, 40, 40), "y": (255, 220, 0), "c": (0, 200, 255), "p": (255, 80, 200),
 }
+
+# The candy bag, fuller after every trick-or-treat stop. Hangs from the
+# kid's hand at column 7, row 9.
+BAG_SIZES = [
+    ["bBb",
+     "BBB",
+     "bBB"],
+    ["ryc",
+     "BBB",
+     "BBB",
+     "bBB"],
+    ["rycp",
+     "BBBB",
+     "BBBB",
+     "bBBB"],
+    ["pryc",
+     "yrcp",
+     "BBBB",
+     "BBBB",
+     "bBBB"],
+]
+BAG_AT = (7, 9)
 
 # The kid, facing right. The legs are drawn separately (KID_LEGS) so they can
 # swing while walking.
@@ -509,9 +560,9 @@ KID_BODY = [
     "  oOYOYo  ",
     "   KKKK   ",
     "  kKKKKK  ",
-    "  kKKKKbBb",
-    "  kKKKKBBB",
-    "  kKKKKbBB",
+    "  kKKKKK  ",
+    "  kKKKK   ",
+    "  kKKKK   ",
 ]
 # Four steps of a walk: legs apart, passing, apart (other leg), passing.
 KID_LEGS = [
@@ -535,6 +586,14 @@ GHOST = [
     "WWWkWWw",
     "WWWWWWw",
 ]
+SCARED_GHOST = [
+    "  WWW  ",
+    " WWWWW ",
+    "WkWWWkW",
+    "WkWWWkW",
+    "WWWkWWw",
+    "WWWkWWw",
+]
 # The wavy bottom edge of the sheet, which flutters between two shapes.
 GHOST_HEMS = ["W WW Ww", "WW WW w"]
 
@@ -545,49 +604,109 @@ ZIP_TIME = 3.0             # seconds for a zip ahead and drift back
 FEET_Y = 29          # the row the kid's shoes are on
 
 
-def draw_duo(img, t, speed=WALK_SPEED):
-    """The kid walks left to right across the screen and comes back round;
-    the ghost floats along just behind, bobbing up and down."""
-    width, _ = img.size
-    lap = width + 40                       # walk fully off screen before coming back
-    distance = t * speed
-    kid_x = int(distance % lap) - 20
+@lru_cache(maxsize=32)
+def _kid_tile(step, bag_level, facing_left):
+    """The kid (body, legs and bag) as a small picture, flipped if facing left.
+    Returns (picture, see-through mask)."""
+    width = 11
+    tile = Image.new("RGB", (width, KID_HEIGHT), (0, 0, 0))
+    draw_sprite(tile, KID_BODY, 0, 0, KID_COLOURS)
+    draw_sprite(tile, KID_LEGS[step], 0, len(KID_BODY), KID_COLOURS)
+    draw_sprite(tile, BAG_SIZES[bag_level], BAG_AT[0], BAG_AT[1], KID_COLOURS)
+    mask = Image.new("1", tile.size, 0)
+    for picture, (ox, oy) in ((KID_BODY, (0, 0)), (KID_LEGS[step], (0, len(KID_BODY))),
+                              (BAG_SIZES[bag_level], BAG_AT)):
+        for row, line in enumerate(picture):
+            for col, letter in enumerate(line):
+                if letter != " " and ox + col < width:
+                    mask.putpixel((ox + col, oy + row), 1)
+    if facing_left:
+        tile, mask = tile.transpose(Image.FLIP_LEFT_RIGHT), mask.transpose(Image.FLIP_LEFT_RIGHT)
+    return tile, mask
 
-    # Change leg position every 3 pixels walked, so the feet don't slide.
-    step = int(distance / 3) % 4
-    bob = 1 if step in (1, 3) else 0       # the body rises a little mid-stride
-    top = FEET_Y - KID_HEIGHT + 1 - bob
+
+def _lerp(a, b, p):
+    p = max(0.0, min(1.0, p))
+    return a + (b - a) * p
+
+
+def _jitter(t, amount=1):
+    """A quick shake: -amount, 0 or +amount, changing many times a second."""
+    return (_hash(int(t * 25)) % (2 * amount + 1)) - amount
+
+
+def kid_top(t, timeline, event):
+    distance = timeline.kid_distance(t)
+    walking = not (event and event["kind"] == "treat")
+    step = int(distance / 3) % 4 if walking else 1
+    bob = 1 if walking and step in (1, 3) else 0
+    return FEET_Y - KID_HEIGHT + 1 - bob, step
+
+
+def draw_duo(img, t, timeline, event):
+    """The kid walks left to right across the screen and comes back round;
+    the ghost floats along just behind, bobbing -- unless a surprise is on."""
+    kid_x = timeline.kid_x(t)
+    top, step = kid_top(t, timeline, event)
+    kind = event["kind"] if event else None
+    into = t - event["start"] if event else 0.0
 
     # Where the ghost normally floats: just behind the kid, bobbing.
-    ghost_x = kid_x - 10
-    ghost_y = top - 1 + round(2 * math.sin(t * 2.2))
+    home_x = kid_x - 10
+    home_y = top - 1 + round(2 * math.sin(t * 2.2))
+    ghost_x, ghost_y = home_x, home_y
+    ghost = GHOST
     in_front = False
+    facing_left = False
 
-    # Now and then it shows off: a loop-the-loop round the kid, or a zip
-    # out in front and a lazy drift back.
-    trick_number = int(t // GHOST_TRICK_EVERY)
-    into = t % GHOST_TRICK_EVERY
-    if trick_number % 2 == 0 and into < LOOP_TIME:
-        angle = 2 * math.pi * into / LOOP_TIME          # once round
-        ghost_x = kid_x + 1 - round(11 * math.cos(angle))
-        ghost_y = top + 2 - round(6 * math.sin(angle))
-        in_front = math.sin(angle) < 0                  # the bottom half passes in front
-    elif trick_number % 2 == 1 and into < ZIP_TIME:
-        # Shoot ahead fast, then drift back to its place.
-        p = into / ZIP_TIME
-        if p < 0.15:
-            ahead = p / 0.15                   # whoosh out in front ...
+    if kind == "treat":
+        # Turn to face the door; the ghost moves round to the other side.
+        facing_left = 0.4 < into < TREAT_PAUSE - 0.4
+        aside = min(into / 0.6, (TREAT_PAUSE - into) / 0.6)
+        ghost_x = round(_lerp(home_x, kid_x + 12, aside))
+    elif kind == "bush":
+        # The ghost gets the fright of its life and hides behind the kid.
+        hide_x, hide_y = kid_x + 7, top + 2
+        if into < 0.35:
+            pass
+        elif into < 1.2:
+            ghost = SCARED_GHOST
+            ghost_x, ghost_y = home_x + _jitter(t), home_y - 5 + _jitter(t + 0.5)
+        elif into < 2.0:
+            ghost = SCARED_GHOST
+            p = (into - 1.2) / 0.8
+            ghost_x = round(_lerp(home_x, hide_x, p))
+            ghost_y = round(_lerp(home_y - 5, hide_y, p))
+        elif into < 3.6:
+            ghost = SCARED_GHOST
+            ghost_x, ghost_y = hide_x + _jitter(t), hide_y
         else:
-            ahead = 1 - (p - 0.15) / 0.85      # ... then float back
-        ghost_x = round(kid_x - 10 + ahead * 26)
+            p = (into - 3.6) / (SCARE_TIME - 3.6)
+            ghost_x = round(_lerp(hide_x, home_x, p))
+            ghost_y = round(_lerp(hide_y, home_y, p))
+    else:
+        # Now and then it shows off: a loop-the-loop round the kid, or a zip
+        # out in front and a lazy drift back.
+        trick_number = int(t // GHOST_TRICK_EVERY)
+        trick_into = t % GHOST_TRICK_EVERY
+        if trick_number % 2 == 0 and trick_into < LOOP_TIME:
+            angle = 2 * math.pi * trick_into / LOOP_TIME      # once round
+            ghost_x = kid_x + 1 - round(11 * math.cos(angle))
+            ghost_y = top + 2 - round(6 * math.sin(angle))
+            in_front = math.sin(angle) < 0                    # bottom half passes in front
+        elif trick_number % 2 == 1 and trick_into < ZIP_TIME:
+            p = trick_into / ZIP_TIME
+            ahead = p / 0.15 if p < 0.15 else 1 - (p - 0.15) / 0.85   # whoosh out, float back
+            ghost_x = round(home_x + ahead * 26)
 
     hem = GHOST_HEMS[int(t * 4) % 2]
     if not in_front:
-        draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
-    draw_sprite(img, KID_BODY, kid_x, top, KID_COLOURS)
-    draw_sprite(img, KID_LEGS[step], kid_x, FEET_Y - 1, KID_COLOURS)
+        draw_sprite(img, ghost + [hem], ghost_x, ghost_y, GHOST_COLOURS)
+    bag_level = min(len(BAG_SIZES) - 1, timeline.treats_done(t))
+    tile, mask = _kid_tile(step, bag_level, facing_left)
+    img.paste(tile, (kid_x, top), mask)
     if in_front:
-        draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
+        draw_sprite(img, ghost + [hem], ghost_x, ghost_y, GHOST_COLOURS)
 
 
 # ---------------------------------------------------------------------------
@@ -747,16 +866,270 @@ def draw_fog(img, t):
                             int(b + (fb - b) * amount))
 
 
+# ---------------------------------------------------------------------------
+# Stage 4: surprise moments. One at a time, every 20-40 seconds.
+#
+# The night is split into slots (30 seconds by default). Each slot gets one
+# surprise, starting somewhere 8-18 seconds into it, so the gap between
+# surprises varies. The window figures use the first few seconds of each 30,
+# so they never clash.
+#
+# The trick-or-treat stops make the kid pause, which changes where the kid is
+# for the rest of the night, so the Timeline keeps track of every pause.
+# ---------------------------------------------------------------------------
+SURPRISES = ["bats", "treat", "bush", "gust", "wink", "witch"]
+TREAT_PAUSE = 5.5      # seconds the kid stands at a door
+CANDY_IN_BAG = 2.6     # seconds into a stop when the last candy lands
+SCARE_TIME = 4.5
+DURATIONS = {"bats": 4.5, "treat": TREAT_PAUSE, "bush": SCARE_TIME, "gust": 4.5,
+             "wink": 2.0, "witch": 4.0}
+MAX_WAIT = 8.0         # how far ahead a door or the bush may be, in seconds of walking
+
+# Where the kid stops for each door: just to the right of it, then turns round.
+DOOR_STOPS = [h["x"] + h["door"]["x"] + h["door"]["width"] + 1 for h in HOUSES]
+SCARE_BUSH = BUSHES[1]
+# The ghost reaches the bush when the kid is this far along.
+SCARE_AT_KID_X = SCARE_BUSH[0] + 9
+
+
+def kind_id(kind):
+    return SURPRISES.index(kind)
+
+
+class Timeline:
+    """Plans the surprises slot by slot and keeps track of the kid's pauses."""
+
+    def __init__(self, every, width, speed=WALK_SPEED):
+        self.every = every
+        self.speed = speed
+        self.lap = width + 40
+        self.events = []          # one per slot (or None)
+        self.pause_starts = []    # start time of every trick-or-treat stop, in order
+        self.last_used = {}       # surprise -> slot it last happened in
+
+    # -- where the kid is ---------------------------------------------------
+    def paused_before(self, t):
+        done = bisect.bisect_right(self.pause_starts, t)
+        total = done * TREAT_PAUSE
+        if done:
+            overrun = self.pause_starts[done - 1] + TREAT_PAUSE - t
+            if overrun > 0:                 # in the middle of a stop right now
+                total -= overrun
+        return total
+
+    def kid_distance(self, t):
+        self._plan_until(t)
+        return self.speed * (t - self.paused_before(t))
+
+    def _kid_x_exact(self, t):
+        return (self.speed * (t - self.paused_before(t))) % self.lap - 20
+
+    def kid_x(self, t):
+        self._plan_until(t)
+        return int(self._kid_x_exact(t))
+
+    def treats_done(self, t):
+        self._plan_until(t)
+        return bisect.bisect_right(self.pause_starts, t - CANDY_IN_BAG)
+
+    # -- the surprises ------------------------------------------------------
+    def current(self, t):
+        """The surprise happening at time t, or None."""
+        self._plan_until(t)
+        slot = int(t // self.every)
+        for k in (slot, slot - 1):
+            event = self.events[k] if 0 <= k < len(self.events) else None
+            if event and event["start"] <= t < event["end"]:
+                return event
+        return None
+
+    def _plan_until(self, t):
+        while len(self.events) * self.every <= t + self.every:
+            self._plan(len(self.events))
+
+    def _plan(self, k):
+        start = k * self.every + 8 + _hash(k, 1) % 11
+        # Try the surprise that has gone longest without happening first, so
+        # they all take turns (ties broken by a shuffle). Skip one that needs
+        # the kid somewhere they can't get to in time.
+        order = sorted(SURPRISES, key=lambda kind: (self.last_used.get(kind, -1), _hash(k, kind_id(kind))))
+        for kind in order:
+            begin = start
+            if kind in ("treat", "bush"):
+                kx = self._kid_x_exact(start)
+                targets = DOOR_STOPS if kind == "treat" else [SCARE_AT_KID_X]
+                ahead = [x for x in targets if x > kx + 0.5]
+                if not ahead or (ahead[0] - kx) / self.speed > MAX_WAIT:
+                    continue
+                begin = start + (ahead[0] - kx) / self.speed
+            event = {"kind": kind, "start": begin, "end": begin + DURATIONS[kind]}
+            if kind == "treat":
+                event["house"] = DOOR_STOPS.index(ahead[0])
+                self.pause_starts.append(begin)
+            self.events.append(event)
+            self.last_used[kind] = k
+            return
+        self.events.append(None)
+
+
+_timelines = {}
+
+
+def get_timeline(every, width):
+    key = (every, width)
+    if key not in _timelines:
+        _timelines[key] = Timeline(every, width)
+    return _timelines[key]
+
+
+# -- Trick-or-treat: the door opens and candy flies into the bag. -------------
+CANDY_COLOURS = [(255, 40, 40), (255, 220, 0), (0, 200, 255), (255, 80, 200)]
+
+
+def draw_open_door(img, house, into):
+    if not 0.8 < into < 3.4:
+        return
+    d = house["door"]
+    dx, dw, dh = house["x"] + d["x"], d["width"], d["height"]
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((dx, GROUND_Y - dh, dx + dw - 1, GROUND_Y - 1), fill=(255, 195, 95))
+    draw.line((dx, GROUND_Y - dh, dx, GROUND_Y - 1), fill=DOOR_PANEL_COLOUR)  # door swung open
+    if 1.0 < into < 2.8:                       # a hand holding out the candy
+        draw.point((dx + dw - 1, GROUND_Y - dh + 3), fill=(230, 175, 135))
+
+
+def draw_candy(img, house, into, kid_x, top):
+    d = house["door"]
+    from_x = house["x"] + d["x"] + d["width"] - 1
+    from_y = GROUND_Y - d["height"] + 3
+    to_x, to_y = kid_x + 2, top + BAG_AT[1]
+    pixels = img.load()
+    for i, launch in enumerate((1.2, 1.6, 2.0)):
+        p = (into - launch) / 0.5
+        if 0 <= p <= 1:
+            x = round(_lerp(from_x, to_x, p))
+            y = round(_lerp(from_y, to_y, p) - 4 * math.sin(math.pi * p))   # a little arc
+            pixels[x, y] = CANDY_COLOURS[i % len(CANDY_COLOURS)]
+
+
+# -- Bush scare: a little monster pops up from behind the bush. ---------------
+MONSTER = [
+    "G   G",
+    "GGGGG",
+    "GyGyG",
+    "GGGGG",
+    "GwGwG",
+]
+MONSTER_COLOURS = {"G": (60, 200, 40), "y": (255, 240, 0), "w": (240, 240, 240)}
+
+
+def draw_bush_monster(img, into):
+    bx, bw = SCARE_BUSH
+    if into < 0.35:
+        shown = into / 0.35
+    elif into < 1.8:
+        shown = 1.0
+    elif into < 2.2:
+        shown = 1 - (into - 1.8) / 0.4
+    else:
+        return
+    y = GROUND_Y - 3 - round(shown * len(MONSTER))
+    draw_sprite(img, MONSTER, bx, y, MONSTER_COLOURS)
+    draw_bush(img, bx, bw)        # the bush in front hides the monster's body
+
+
+# -- Bats sweep across the sky. ------------------------------------------------
+BAT_FRAMES = [
+    ["kk kk",
+     " kkk "],
+    [" kkk ",
+     "kk kk"],
+]
+
+
+def draw_bats(img, into, count=7):
+    width, _ = img.size
+    for i in range(count):
+        x = round(width + 4 - 42 * into + (_hash(i, 3) % 30))
+        y = 11 + (i * 3) % 8 + round(2 * math.sin(into * 5 + i))
+        frame = BAT_FRAMES[(int(into * 10) + i) % 2]
+        draw_sprite(img, frame, x, y, {"k": (0, 0, 0)})
+
+
+# -- A witch on a broomstick flies across the moon. ----------------------------
+WITCH = [
+    "    k    ",
+    "   kk    ",
+    "  kkkk   ",
+    "   kkk   ",
+    "  kkkk   ",
+    "kkkkkkkkk",
+    "k k  k   ",
+]
+
+
+def draw_witch(img, into):
+    x = round(86 + 12 * into)
+    y = 5 + round(1.5 * math.sin(into * 3))
+    pixels = img.load()
+    width, height = img.size
+    cx, cy = MOON_CENTRE
+    for row, line in enumerate(WITCH):
+        for col, letter in enumerate(line):
+            px, py = x + col, y + row
+            if letter == " " or not (0 <= px < width and 0 <= py < height):
+                continue
+            on_moon = (px - cx) ** 2 + (py - cy) ** 2 <= MOON_RADIUS ** 2
+            bright_behind = sum(pixels[px, py]) > 60
+            # Black against the moon or sunset; a faint grey against black sky.
+            pixels[px, py] = (0, 0, 0) if on_moon or bright_behind else (55, 55, 60)
+
+
+# -- A big gust: a wave of leaves across the whole screen. ---------------------
+def draw_gust_wave(img, into, count=34):
+    pixels = img.load()
+    width, height = img.size
+    for i in range(count):
+        x = round(-8 + 55 * into - (_hash(i, 4) % 45))
+        y = 8 + _hash(i, 5) % 21 + round(2 * math.sin(into * 6 + i))
+        colour = LEAF_COLOURS[i % len(LEAF_COLOURS)]
+        spin = (int(into * 12) + i) % 3
+        dots = [(0, 0)] if spin == 0 else [(0, 0), (1, 0)] if spin == 1 else [(0, 0), (0, 1)]
+        for dx, dy in dots:
+            px, py = x + dx, y + dy
+            if 0 <= px < width and 0 <= py < height:
+                pixels[px, py] = colour
+
+
 def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     """Draw one frame of the scene and return it as an image."""
+    options = options or {}
+    timeline = get_timeline(float(options.get("surprise_every", 30)), width)
+    event = timeline.current(t)
+    kind = event["kind"] if event else None
+    into = t - event["start"] if event else 0.0
+
     img = _background(width, height).copy()
     draw_twinkling_stars(img, t)
+    if kind == "witch":
+        draw_witch(img, into)
     draw_porch_lamps(img, t)
-    draw_pumpkins(img, t)
+    draw_pumpkins(img, t, wink=into if kind == "wink" else None)
     draw_window_figure(img, t)
-    draw_duo(img, t)
+    if kind == "treat":
+        draw_open_door(img, HOUSES[event["house"]], into)
+    if kind == "bush":
+        draw_bush_monster(img, into)
+    draw_duo(img, t, timeline, event)
+    if kind == "treat":
+        top, _ = kid_top(t, timeline, event)
+        draw_candy(img, HOUSES[event["house"]], into, timeline.kid_x(t), top)
     draw_fog(img, t)
     draw_leaves(img, t)
+    if kind == "gust":
+        draw_gust_wave(img, into)
+    if kind == "bats":
+        draw_bats(img, into)
     if show_text:
         draw_countdown_text(img, f"{days} DAYS TO HALLOWEEN")
     return img

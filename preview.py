@@ -57,14 +57,27 @@ def main():
     led_look(draw_scene(4.2, args.days, options=options)).save(args.out / "still.png")
     led_look(draw_scene(4.2, args.days, options=options, show_text=True)).save(
         args.out / "still_with_text.png")
-    frames[0].save(
-        args.out / "animation.gif",
-        save_all=True,
-        append_images=frames[1:],
-        duration=1000 // args.fps,
-        loop=0,
-    )
-    print(f"Wrote {args.out / 'still.png'} and {args.out / 'animation.gif'}")
+    save_gif(frames, args.out / "animation.gif", args.fps)
+
+    # Highlights: a few seconds of each of the first six surprises, back to
+    # back, so you don't have to wait minutes between them.
+    timeline = halloween_scene.get_timeline(30.0, 128)
+    timeline.current(200)
+    highlights = []
+    for event in [e for e in timeline.events if e][:6]:
+        start = event["start"] - 0.8
+        length = event["end"] - event["start"] + 1.6
+        highlights += [
+            led_look(draw_scene(start + i / args.fps, args.days, options=options, show_text=True))
+            for i in range(int(length * args.fps))
+        ]
+    save_gif(highlights, args.out / "surprises.gif", args.fps)
+    print(f"Wrote {args.out / 'animation.gif'} and {args.out / 'surprises.gif'}")
+
+
+def save_gif(frames, path, fps):
+    frames[0].save(path, save_all=True, append_images=frames[1:],
+                   duration=1000 // fps, loop=0)
 
 
 if __name__ == "__main__":
