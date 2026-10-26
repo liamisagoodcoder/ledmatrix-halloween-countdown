@@ -1,0 +1,25 @@
+{
+  "id": "halloween-countdown",
+  "name": "Halloween Countdown",
+  "version": "1.0.0",
+  "author": "liamisagoodcoder",
+  "description": "Animated Halloween street at sunset: a pumpkin-head kid and a ghost go trick-or-treating past real-looking houses, with bats, a witch across the moon and other surprises. Counts the days to Halloween. Designed for 128x32 (two 64x32 panels).",
+  "category": "holiday",
+  "tags": [
+    "halloween",
+    "countdown",
+    "holiday",
+    "seasonal",
+    "animated"
+  ],
+  "entry_point": "manager.py",
+  "class_name": "HalloweenCountdownPlugin",
+  "display_modes": [
+    "halloween-countdown"
+  ],
+  "compatible_versions": [
+    ">=2.0.0"
+  ],
+  "update_interval": 3600,
+  "default_duration": 30
+}

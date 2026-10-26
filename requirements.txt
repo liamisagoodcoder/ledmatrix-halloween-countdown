@@ -1,0 +1,1 @@
+# Pillow is already installed by LEDMatrix; nothing extra needed.

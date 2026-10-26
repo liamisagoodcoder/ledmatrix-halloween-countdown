@@ -9,6 +9,7 @@ pumpkin-head kid and the ghost walking across, and figures in a window.
 Stage 3: ambient motion (stars, flicker, leaves, fog, ghost tricks).
 Stage 4: surprise moments (bats, trick-or-treat, bush scare, big gust,
 winking pumpkin, witch flyby), one at a time.
+Stage 5: on Halloween itself, HAPPY HALLOWEEN with extra pumpkins and bats.
 
 How the houses are drawn: each house is described by a few numbers in HOUSES
 (where it is, how big, what it's made of, where the windows go). The code
@@ -451,13 +452,18 @@ WINKING_JACK_O_LANTERN = [
 WINKING_PUMPKIN = 1   # which of PUMPKINS winks (the big one by the cottage)
 
 
-def draw_pumpkins(img, t=None, wink=None):
-    """Draw the jack-o'-lanterns. Given the time t, each candle flickers.
+# Extra jack-o'-lanterns put out on Halloween itself.
+HALLOWEEN_PUMPKINS = [(6, "small"), (36, "small"), (83, "small"),
+                      (107, "small"), (113, "big"), (121, "small")]
+
+
+def draw_pumpkins(img, t=None, wink=None, pumpkins=PUMPKINS):
+    """Draw the jack-o'-lanterns. Given the time t, each one glows gently.
     wink is how far into a wink surprise we are (seconds), or None."""
-    for i, (x, size) in enumerate(PUMPKINS):
+    for i, (x, size) in enumerate(pumpkins):
         picture = BIG_JACK_O_LANTERN if size == "big" else JACK_O_LANTERN
         flare = 1.0
-        if wink is not None and i == WINKING_PUMPKIN:
+        if wink is not None and i == WINKING_PUMPKIN and pumpkins is PUMPKINS:
             flare = 1.25
             if 0.3 < wink < 0.7 or 1.1 < wink < 1.5:
                 picture = WINKING_JACK_O_LANTERN
@@ -1127,6 +1133,8 @@ def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
         draw_witch(img, into)
     draw_porch_lamps(img, t)
     draw_pumpkins(img, t, wink=into if kind == "wink" else None)
+    if days == 0:
+        draw_pumpkins(img, t + 5.0, pumpkins=HALLOWEEN_PUMPKINS)
     draw_window_figure(img, t)
     if kind == "treat":
         draw_open_door(img, HOUSES[event["house"]], into)
@@ -1142,6 +1150,17 @@ def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
         draw_gust_wave(img, into)
     if kind == "bats":
         draw_bats(img, into)
+    if days == 0:
+        # Halloween night: a flock of bats every 10 seconds.
+        draw_bats(img, t % 10.0, count=5)
     if show_text:
-        draw_countdown_text(img, f"{days} DAYS TO HALLOWEEN")
+        draw_countdown_text(img, countdown_message(days))
     return img
+
+
+def countdown_message(days):
+    if days == 0:
+        return "HAPPY HALLOWEEN"
+    if days == 1:
+        return "1 DAY TO HALLOWEEN"
+    return f"{days} DAYS TO HALLOWEEN"

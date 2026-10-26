@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Halloween Countdown",
+  "description": "Animated trick-or-treat street with a countdown to Halloween.",
+  "type": "object",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Show the Halloween Countdown in the rotation"
+    },
+    "display_duration": {
+      "type": "number",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 300,
+      "description": "How long the scene stays on screen each time (seconds)"
+    },
+    "show_countdown": {
+      "type": "boolean",
+      "default": true,
+      "description": "Show \"X DAYS TO HALLOWEEN\" in the top-left corner (HAPPY HALLOWEEN on the day)"
+    },
+    "animation_speed": {
+      "type": "number",
+      "default": 1.0,
+      "minimum": 0.25,
+      "maximum": 3.0,
+      "description": "How fast everything moves: 1 is normal, 0.5 is half speed, 2 is double"
+    },
+    "surprise_every_seconds": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 15,
+      "maximum": 300,
+      "description": "Roughly how often a surprise happens (bats, a witch, trick-or-treating...), in seconds"
+    },
+    "animation_fps": {
+      "type": "integer",
+      "default": 30,
+      "minimum": 5,
+      "maximum": 60,
+      "description": "Animation frames per second. Lower it if the Pi struggles.",
+      "x-advanced": true
+    }
+  }
+}
