@@ -6,6 +6,7 @@ Victorian with a turret -- with warm lit windows and jack-o'-lanterns.
 
 Built in stages (see README). Stage 1: the still scene. Stage 2: the
 pumpkin-head kid and the ghost walking across, and figures in a window.
+Stage 3: ambient motion (stars, flicker, leaves, fog, ghost tricks).
 
 How the houses are drawn: each house is described by a few numbers in HOUSES
 (where it is, how big, what it's made of, where the windows go). The code
@@ -434,10 +435,23 @@ def draw_bushes(img):
         draw.point((x + w - 3, GROUND_Y - 3), fill=BUSH["L"])
 
 
-def draw_pumpkins(img):
-    for x, size in PUMPKINS:
+def draw_pumpkins(img, t=None):
+    """Draw the jack-o'-lanterns. Given the time t, each candle flickers."""
+    for i, (x, size) in enumerate(PUMPKINS):
         picture = BIG_JACK_O_LANTERN if size == "big" else JACK_O_LANTERN
-        draw_sprite(img, picture, x, GROUND_Y - len(picture) + 1, PUMPKIN)
+        colours = PUMPKIN
+        if t is not None:
+            # Two wobbles at odd speeds, different for every pumpkin, so the
+            # flicker never looks like a repeating pattern.
+            wobble = 0.5 * math.sin(t * 9.1 + i * 1.7) + 0.5 * math.sin(t * 13.7 + i * 4.1)
+            glow = 0.78 + 0.22 * wobble
+            colours = dict(PUMPKIN, Y=_scale(PUMPKIN["Y"], glow),
+                           O=_scale(PUMPKIN["O"], 0.92 + 0.08 * wobble))
+        draw_sprite(img, picture, x, GROUND_Y - len(picture) + 1, colours)
+
+
+def _scale(colour, amount):
+    return tuple(max(0, min(255, int(c * amount))) for c in colour)
 
 
 def draw_ground(img):
@@ -525,6 +539,9 @@ GHOST = [
 GHOST_HEMS = ["W WW Ww", "WW WW w"]
 
 WALK_SPEED = 9.0     # pixels per second
+GHOST_TRICK_EVERY = 11.0   # seconds between the ghost's tricks
+LOOP_TIME = 1.6            # seconds for a loop-the-loop
+ZIP_TIME = 3.0             # seconds for a zip ahead and drift back
 FEET_Y = 29          # the row the kid's shoes are on
 
 
@@ -541,13 +558,36 @@ def draw_duo(img, t, speed=WALK_SPEED):
     bob = 1 if step in (1, 3) else 0       # the body rises a little mid-stride
     top = FEET_Y - KID_HEIGHT + 1 - bob
 
+    # Where the ghost normally floats: just behind the kid, bobbing.
     ghost_x = kid_x - 10
     ghost_y = top - 1 + round(2 * math.sin(t * 2.2))
-    hem = GHOST_HEMS[int(t * 4) % 2]
-    draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
+    in_front = False
 
+    # Now and then it shows off: a loop-the-loop round the kid, or a zip
+    # out in front and a lazy drift back.
+    trick_number = int(t // GHOST_TRICK_EVERY)
+    into = t % GHOST_TRICK_EVERY
+    if trick_number % 2 == 0 and into < LOOP_TIME:
+        angle = 2 * math.pi * into / LOOP_TIME          # once round
+        ghost_x = kid_x + 1 - round(11 * math.cos(angle))
+        ghost_y = top + 2 - round(6 * math.sin(angle))
+        in_front = math.sin(angle) < 0                  # the bottom half passes in front
+    elif trick_number % 2 == 1 and into < ZIP_TIME:
+        # Shoot ahead fast, then drift back to its place.
+        p = into / ZIP_TIME
+        if p < 0.15:
+            ahead = p / 0.15                   # whoosh out in front ...
+        else:
+            ahead = 1 - (p - 0.15) / 0.85      # ... then float back
+        ghost_x = round(kid_x - 10 + ahead * 26)
+
+    hem = GHOST_HEMS[int(t * 4) % 2]
+    if not in_front:
+        draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
     draw_sprite(img, KID_BODY, kid_x, top, KID_COLOURS)
     draw_sprite(img, KID_LEGS[step], kid_x, FEET_Y - 1, KID_COLOURS)
+    if in_front:
+        draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +609,7 @@ WINDOW_FIGURES = [
      "kgkgk",
      "kkkkk"],
 ]
-FIGURE_EVERY = 12.0    # seconds between appearances
+FIGURE_EVERY = 30.0    # seconds between appearances
 FIGURE_STAYS = 4.0     # seconds each one stays
 
 
@@ -603,11 +643,120 @@ def draw_window_figure(img, t):
                 pixels[gx + col, py] = colours[letter]
 
 
+# ---------------------------------------------------------------------------
+# Stage 3: ambient motion -- twinkling stars, flickering lamps, blowing
+# leaves, drifting fog.
+# ---------------------------------------------------------------------------
+def draw_twinkling_stars(img, t):
+    pixels = img.load()
+    for i, (x, y) in enumerate(STARS):
+        brightness = 0.55 + 0.45 * math.sin(t * (1.3 + 0.37 * i) + i * 2.1)
+        star = _scale(STAR_COLOURS[i % len(STAR_COLOURS)], brightness)
+        under = pixels[x, y]
+        pixels[x, y] = tuple(max(a, b) for a, b in zip(under, star))
+
+
+def draw_porch_lamps(img, t):
+    """Each porch lamp flickers a little and casts a soft warm glow."""
+    pixels = img.load()
+    width, height = img.size
+    for i, house in enumerate(HOUSES):
+        lx, ly = house["lamp"]
+        x, y = house["x"] + lx, house["wall_top"] + ly
+        flicker = 0.85 + 0.15 * math.sin(t * 17.0 + i * 2.3) * math.sin(t * 5.3 + i)
+        pixels[x, y] = _scale((255, 240, 170), flicker)
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            px, py = x + dx, y + dy
+            if 0 <= px < width and 0 <= py < height:
+                r, g, b = pixels[px, py]
+                pixels[px, py] = (min(255, r + int(70 * flicker)), min(255, g + int(45 * flicker)),
+                                  min(255, b + int(10 * flicker)))
+
+
+# The wind. It goes calm -> gusty -> calm about every 14 seconds. gust(t) is
+# how strong it is right now (0 to 1); wind_travel(t) is how far it has pushed
+# a leaf so far (the running total of gust). Both are worked out from the
+# time, so nothing needs remembering between frames.
+GUST_PERIOD = 14.0
+CALM_SPEED = 3.0       # pixels per second when it's calm
+GUST_SPEED = 38.0      # extra pixels per second at the height of a gust
+
+
+def gust(t):
+    return ((1 - math.cos(2 * math.pi * t / GUST_PERIOD)) / 2) ** 2
+
+
+def wind_travel(t):
+    w = 2 * math.pi / GUST_PERIOD
+    # The total of gust() from 0 to t, written out by hand.
+    return 3 * t / 8 - math.sin(w * t) / (2 * w) + math.sin(2 * w * t) / (16 * w)
+
+
+LEAF_COLOURS = [(230, 90, 0), (200, 40, 10), (240, 170, 20), (130, 70, 20), (255, 120, 0)]
+_LEAVES = [
+    # (start x, resting height, how high a gust lifts it, flutter speed, colour)
+    (7, 27, 9, 5.0, 0), (31, 25, 13, 6.3, 1), (52, 28, 7, 4.4, 2), (70, 26, 11, 7.1, 3),
+    (88, 24, 15, 5.6, 4), (104, 27, 8, 6.8, 0), (119, 25, 12, 4.9, 2), (15, 22, 10, 6.0, 1),
+    (62, 21, 14, 5.2, 4), (97, 23, 9, 7.6, 3),
+]
+
+
+def draw_leaves(img, t):
+    pixels = img.load()
+    width, height = img.size
+    lap = width + 10
+    strength = gust(t)
+    for i, (start, rest_y, lift, flutter, colour_index) in enumerate(_LEAVES):
+        lag = i * 0.15                                    # leaves don't all move at once
+        travel = CALM_SPEED * t + GUST_SPEED * wind_travel(t - lag)
+        x = int((start + travel) % lap) - 5
+        y = round(rest_y - lift * gust(t - lag) + 1.5 * math.sin(t * flutter + i))
+        colour = LEAF_COLOURS[colour_index]
+        # Tumbling: the leaf flips between a dot and a little 2-pixel shape.
+        spin = int(t * flutter * (0.5 + strength)) % 3
+        dots = [(0, 0)] if spin == 0 else [(0, 0), (1, 0)] if spin == 1 else [(0, 0), (0, 1)]
+        for dx, dy in dots:
+            px, py = x + dx, y + dy
+            if 0 <= px < width and 0 <= py < height:
+                pixels[px, py] = colour
+
+
+FOG_COLOUR = (150, 150, 175)
+FOG_TOP = 24          # fog reaches up to this row at its thickest
+FOG_SPEED = 2.5       # pixels per second, drifting right
+
+
+def draw_fog(img, t):
+    """Low patchy fog along the bottom, see-through, drifting slowly."""
+    pixels = img.load()
+    width, height = img.size
+    for x in range(width):
+        drift = x - FOG_SPEED * t
+        # Wavy thickness made of three slow waves, so the patches look natural.
+        density = (0.5 + 0.25 * math.sin(drift * 0.09) + 0.15 * math.sin(drift * 0.23 + 1.0)
+                   + 0.1 * math.sin(drift * 0.041 + 2.0 + t * 0.2))
+        depth = height - FOG_TOP
+        for y in range(FOG_TOP, height):
+            # Thicker near the ground, fading out as it rises.
+            amount = density * ((y - FOG_TOP + 1) / depth) * 0.45
+            if amount <= 0.02:
+                continue
+            r, g, b = pixels[x, y]
+            fr, fg, fb = FOG_COLOUR
+            pixels[x, y] = (int(r + (fr - r) * amount), int(g + (fg - g) * amount),
+                            int(b + (fb - b) * amount))
+
+
 def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     """Draw one frame of the scene and return it as an image."""
     img = _background(width, height).copy()
+    draw_twinkling_stars(img, t)
+    draw_porch_lamps(img, t)
+    draw_pumpkins(img, t)
     draw_window_figure(img, t)
     draw_duo(img, t)
+    draw_fog(img, t)
+    draw_leaves(img, t)
     if show_text:
         draw_countdown_text(img, f"{days} DAYS TO HALLOWEEN")
     return img
