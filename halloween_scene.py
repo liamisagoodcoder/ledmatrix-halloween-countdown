@@ -43,7 +43,7 @@ SKY = [(0, 0, 0)] * 9 + [
 ]
 MOON = (255, 235, 160)
 MOON_DARK = (220, 190, 110)
-STAR_COLOURS = [(230, 230, 230), (255, 210, 50), (0, 200, 180)]
+STAR_COLOUR = (215, 220, 240)   # soft white
 TEXT = (255, 120, 10)          # pumpkin orange
 TEXT_SHADOW = (90, 25, 0)      # dark ember shadow under the letters
 GRASS = (20, 120, 20)
@@ -217,9 +217,9 @@ TREE_BRANCHES = [
     ((98, 12), (95, 12), 1),
 ]
 
-# Fixed star positions (kept clear of the countdown text in the top-left
-# corner and of the moon).
-STARS = [(100, 2), (104, 10), (99, 7), (125, 20), (92, 9), (60, 9), (24, 10)]
+# A few stars, only up in the dark part of the sky: beside the moon and in
+# the gaps above the roofs (clear of the countdown text and the orange glow).
+STARS = [(99, 2), (106, 6), (126, 3), (5, 10), (61, 10), (80, 10)]
 
 MOON_CENTRE = (117, 9)
 MOON_RADIUS = 7
@@ -411,10 +411,6 @@ def draw_sky(img):
     width, height = img.size
     for y, colour in enumerate(SKY[:height]):
         draw.line((0, y, width - 1, y), fill=colour)
-
-    pixels = img.load()
-    for i, (x, y) in enumerate(STARS):
-        pixels[x, y] = STAR_COLOURS[i % len(STAR_COLOURS)]
 
     cx, cy = MOON_CENTRE
     r = MOON_RADIUS
@@ -766,13 +762,29 @@ def draw_window_figure(img, t):
 # Stage 3: ambient motion -- twinkling stars, flickering lamps, blowing
 # leaves, drifting fog.
 # ---------------------------------------------------------------------------
+SPARKLE_EVERY = 7.0    # each star flashes a little cross about this often
+SPARKLE_TIME = 0.5
+
+
 def draw_twinkling_stars(img, t):
+    """Stars gently brighten and dim; now and then one flashes a sparkle."""
     pixels = img.load()
+    width, height = img.size
     for i, (x, y) in enumerate(STARS):
-        brightness = 0.55 + 0.45 * math.sin(t * (1.3 + 0.37 * i) + i * 2.1)
-        star = _scale(STAR_COLOURS[i % len(STAR_COLOURS)], brightness)
-        under = pixels[x, y]
-        pixels[x, y] = tuple(max(a, b) for a, b in zip(under, star))
+        brightness = 0.5 + 0.4 * math.sin(t * (0.9 + 0.23 * i) + i * 2.1)
+        # Stars take turns to sparkle, spread out so two never flash together.
+        into = (t + i * SPARKLE_EVERY / len(STARS)) % SPARKLE_EVERY
+        sparkling = into < SPARKLE_TIME
+        if sparkling:
+            brightness = 1.0
+        pixels[x, y] = _scale(STAR_COLOUR, brightness)
+        if sparkling:
+            arm = _scale(STAR_COLOUR, 0.45 * math.sin(math.pi * into / SPARKLE_TIME))
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                px, py = x + dx, y + dy
+                # Only over dark sky, never on top of the text or a roof.
+                if 0 <= px < width and 0 <= py < height and sum(pixels[px, py]) < 40:
+                    pixels[px, py] = arm
 
 
 def draw_porch_lamps(img, t):
