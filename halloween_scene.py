@@ -5,7 +5,7 @@ from real materials -- a brick cottage, a two-storey stone house and a wooden
 Victorian with a turret -- with warm lit windows and jack-o'-lanterns.
 
 Built in stages (see README). Stage 1: the still scene. Stage 2: the
-vampire kid and the ghost walking across, and figures in a window.
+pumpkin-head kid and the ghost walking across, and figures in a window.
 Stage 3: ambient motion (stars, flicker, leaves, fog, ghost tricks).
 Stage 4: surprise moments (bats, trick-or-treat, bush scare, big gust,
 winking pumpkin, witch flyby), one at a time.
@@ -506,17 +506,15 @@ def _background(width, height):
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: the vampire kid and the little ghost.
+# Stage 2: the pumpkin-head kid and the little ghost.
 # ---------------------------------------------------------------------------
 KID_COLOURS = {
-    "F": (230, 220, 210),   # pale vampire face
-    "R": (255, 20, 20),     # red eyes
-    "h": (35, 32, 42),      # slicked-back black hair
-    "m": (60, 0, 0),        # mouth
-    "w": (255, 255, 255),   # fangs
-    "K": (40, 36, 48),      # black cape
-    "k": (26, 24, 32),      # cape in shadow
-    "L": (200, 20, 30),     # red cape lining and collar
+    "O": (235, 95, 0),      # pumpkin head
+    "o": (150, 50, 0),      # pumpkin shading round the edge
+    "Y": (255, 245, 120),   # candle glow through the carved face
+    "g": (40, 160, 20),     # stem
+    "K": (52, 52, 62),      # dark costume
+    "k": (34, 34, 42),      # costume shadow
     "B": (200, 165, 105),   # paper candy bag
     "b": (150, 115, 65),    # bag shading
     "S": (90, 90, 100),     # shoes
@@ -546,34 +544,22 @@ BAG_SIZES = [
 ]
 BAG_AT = (7, 9)
 
-# The vampire kid, facing right. There are two versions: the cape flared out
-# behind, and the cape swinging in -- they swap every step so the cape swishes.
-# The legs are drawn separately (KID_LEGS) so they can swing while walking.
-_KID_HEAD = [
-    "   hhhh    ",
-    "  hhhhhh   ",
-    "  hFFhFF   ",   # widow's peak
-    "  FRFFRF   ",   # red eyes
-    "  FFFFFF   ",
-    "  FwmmwF   ",   # mouth with two fangs
-    " L FFFF L  ",   # pointed collar
-    " LLKKKKKLL ",
+# The kid, facing right. The legs are drawn separately (KID_LEGS) so they can
+# swing while walking.
+KID_BODY = [
+    "    gg    ",
+    "  oOOOOo  ",
+    " oOOOOOOo ",
+    " oOYYOYYo ",
+    " oOOOOOOo ",
+    " oOYYYYYo ",
+    "  oOYOYo  ",
+    "   KKKK   ",
+    "  kKKKKK  ",
+    "  kKKKKK  ",
+    "  kKKKK   ",
+    "  kKKKK   ",
 ]
-KID_BODIES = [
-    _KID_HEAD + [
-        "LLkKKKKKKL ",
-        "LkKKKKKKK  ",
-        "LkKKKKKKK  ",
-        "LkKKKKKK   ",
-    ],
-    _KID_HEAD + [
-        " LkKKKKKKL ",
-        " LkKKKKKK  ",
-        " LkKKKKKK  ",
-        "  kKKKKK   ",
-    ],
-]
-KID_BODY = KID_BODIES[0]
 # Four steps of a walk: legs apart, passing, apart (other leg), passing.
 KID_LEGS = [
     ["  K   K   ",
@@ -619,13 +605,12 @@ def _kid_tile(step, bag_level, facing_left):
     """The kid (body, legs and bag) as a small picture, flipped if facing left.
     Returns (picture, see-through mask)."""
     width = 11
-    body = KID_BODIES[step % 2]          # the cape swishes every step
     tile = Image.new("RGB", (width, KID_HEIGHT), (0, 0, 0))
-    draw_sprite(tile, body, 0, 0, KID_COLOURS)
+    draw_sprite(tile, KID_BODY, 0, 0, KID_COLOURS)
     draw_sprite(tile, KID_LEGS[step], 0, len(KID_BODY), KID_COLOURS)
     draw_sprite(tile, BAG_SIZES[bag_level], BAG_AT[0], BAG_AT[1], KID_COLOURS)
     mask = Image.new("1", tile.size, 0)
-    for picture, (ox, oy) in ((body, (0, 0)), (KID_LEGS[step], (0, len(KID_BODY))),
+    for picture, (ox, oy) in ((KID_BODY, (0, 0)), (KID_LEGS[step], (0, len(KID_BODY))),
                               (BAG_SIZES[bag_level], BAG_AT)):
         for row, line in enumerate(picture):
             for col, letter in enumerate(line):
