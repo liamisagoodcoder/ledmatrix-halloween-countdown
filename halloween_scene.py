@@ -4,7 +4,8 @@ moon with a twisty bare tree across it, and a street of three houses built
 from real materials -- a brick cottage, a two-storey stone house and a wooden
 Victorian with a turret -- with warm lit windows and jack-o'-lanterns.
 
-Built in stages (see README). Stage 1: the still scene.
+Built in stages (see README). Stage 1: the still scene. Stage 2: the
+pumpkin-head kid and the ghost walking across, and figures in a window.
 
 How the houses are drawn: each house is described by a few numbers in HOUSES
 (where it is, how big, what it's made of, where the windows go). The code
@@ -16,6 +17,7 @@ in HOUSES to move or resize anything.
 Designed for a 128x32 display (two 64x32 panels side by side).
 """
 
+import math
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -142,10 +144,10 @@ HOUSES = [
     {   # Two-storey stone house with shutters.
         "x": 29, "width": 29, "wall_top": 15, "wall": STONE,
         "roof": "side", "roof_rise": 6,
-        "windows": [(3, 2, 3, 3), (13, 2, 3, 3), (23, 2, 3, 3),
-                    (3, 8, 3, 3), (23, 8, 3, 3)],
+        "windows": [(3, 2, 3, 3), (23, 2, 3, 3), (3, 8, 3, 3), (23, 8, 3, 3)],
+        "spooky_window": (12, 1, 5, 4),   # bigger, no crossbars: figures appear here
         "shutters": True,
-        "door": {"x": 12, "width": 5, "height": 7},
+        "door": {"x": 12, "width": 5, "height": 6},
         "lamp": (19, 7),
     },
     {   # Wooden Victorian with a front gable and a pointed turret.
@@ -264,13 +266,13 @@ def draw_sprite(img, picture, x, y, colours):
 # ---------------------------------------------------------------------------
 # Building the material map for the houses.
 # ---------------------------------------------------------------------------
-def _window(draw, x, y, w, h, shutters=False):
+def _window(draw, x, y, w, h, shutters=False, crossbars=True):
     """A window: cream frame, warm glass, a wooden cross, a sill underneath."""
     draw.rectangle((x - 1, y - 1, x + w, y + h), fill=TRIM)
     draw.rectangle((x, y, x + w - 1, y + h - 1), fill=GLASS)
-    if w >= 3:
+    if crossbars and w >= 3:
         draw.line((x + w // 2, y, x + w // 2, y + h - 1), fill=MULLION)
-    if h >= 3:
+    if crossbars and h >= 3:
         draw.line((x, y + h // 2, x + w - 1, y + h // 2), fill=MULLION)
     draw.line((x - 2, y + h, x + w + 1, y + h), fill=TRIM)        # sill
     if shutters:
@@ -351,6 +353,11 @@ def _house_layer(width, height):
         # Windows.
         for wx, wy, ww, wh in house["windows"]:
             _window(draw, x + wx, top + wy, ww, wh, house.get("shutters", False))
+            glass_boxes.append((x + wx, top + wy, ww, wh))
+        if "spooky_window" in house:
+            wx, wy, ww, wh = house["spooky_window"]
+            _window(draw, x + wx, top + wy, ww, wh, house.get("shutters", False),
+                    crossbars=False)
             glass_boxes.append((x + wx, top + wy, ww, wh))
 
         # Door with a frame, panels, knob and a stone step.
@@ -461,9 +468,146 @@ def _background(width, height):
     return img
 
 
+# ---------------------------------------------------------------------------
+# Stage 2: the pumpkin-head kid and the little ghost.
+# ---------------------------------------------------------------------------
+KID_COLOURS = {
+    "O": (235, 95, 0),      # pumpkin head
+    "o": (150, 50, 0),      # pumpkin shading round the edge
+    "Y": (255, 245, 120),   # candle glow through the carved face
+    "g": (40, 160, 20),     # stem
+    "K": (52, 52, 62),      # dark costume
+    "k": (34, 34, 42),      # costume shadow
+    "B": (200, 165, 105),   # paper candy bag
+    "b": (150, 115, 65),    # bag shading
+    "S": (90, 90, 100),     # shoes
+}
+
+# The kid, facing right. The legs are drawn separately (KID_LEGS) so they can
+# swing while walking.
+KID_BODY = [
+    "    gg    ",
+    "  oOOOOo  ",
+    " oOOOOOOo ",
+    " oOYYOYYo ",
+    " oOOOOOOo ",
+    " oOYYYYYo ",
+    "  oOYOYo  ",
+    "   KKKK   ",
+    "  kKKKKK  ",
+    "  kKKKKbBb",
+    "  kKKKKBBB",
+    "  kKKKKbBB",
+]
+# Four steps of a walk: legs apart, passing, apart (other leg), passing.
+KID_LEGS = [
+    ["  K   K   ",
+     " SS   SS  "],
+    ["   K K    ",
+     "   SSSS   "],
+    ["  k   K   ",
+     " SS   SS  "],
+    ["   K k    ",
+     "   SSSS   "],
+]
+KID_HEIGHT = len(KID_BODY) + 2
+
+GHOST_COLOURS = {"W": (225, 235, 255), "w": (150, 160, 190), "k": (0, 0, 0)}
+GHOST = [
+    "  WWW  ",
+    " WWWWW ",
+    "WWkWkWW",
+    "WWWWWWW",
+    "WWWkWWw",
+    "WWWWWWw",
+]
+# The wavy bottom edge of the sheet, which flutters between two shapes.
+GHOST_HEMS = ["W WW Ww", "WW WW w"]
+
+WALK_SPEED = 9.0     # pixels per second
+FEET_Y = 29          # the row the kid's shoes are on
+
+
+def draw_duo(img, t, speed=WALK_SPEED):
+    """The kid walks left to right across the screen and comes back round;
+    the ghost floats along just behind, bobbing up and down."""
+    width, _ = img.size
+    lap = width + 40                       # walk fully off screen before coming back
+    distance = t * speed
+    kid_x = int(distance % lap) - 20
+
+    # Change leg position every 3 pixels walked, so the feet don't slide.
+    step = int(distance / 3) % 4
+    bob = 1 if step in (1, 3) else 0       # the body rises a little mid-stride
+    top = FEET_Y - KID_HEIGHT + 1 - bob
+
+    ghost_x = kid_x - 10
+    ghost_y = top - 1 + round(2 * math.sin(t * 2.2))
+    hem = GHOST_HEMS[int(t * 4) % 2]
+    draw_sprite(img, GHOST + [hem], ghost_x, ghost_y, GHOST_COLOURS)
+
+    draw_sprite(img, KID_BODY, kid_x, top, KID_COLOURS)
+    draw_sprite(img, KID_LEGS[step], kid_x, FEET_Y - 1, KID_COLOURS)
+
+
+# ---------------------------------------------------------------------------
+# Spooky figures that now and then rise up in the big upstairs window.
+# Each is drawn as a dark shape against the lit glass.
+# ---------------------------------------------------------------------------
+WINDOW_FIGURE_COLOURS = {"k": (0, 0, 0), "r": (255, 20, 20), "g": (90, 255, 40)}
+WINDOW_FIGURES = [
+    [" kkk ",      # a shadowy figure with red eyes
+     "krkrk",
+     "kkkkk",
+     "kkkkk"],
+    ["  k  ",      # a witch
+     " kkk ",
+     "kkkkk",
+     " kgk "],
+    ["k   k",      # a black cat with green eyes
+     "kkkkk",
+     "kgkgk",
+     "kkkkk"],
+]
+FIGURE_EVERY = 12.0    # seconds between appearances
+FIGURE_STAYS = 4.0     # seconds each one stays
+
+
+def draw_window_figure(img, t):
+    width, height = img.size
+    house = next(h for h in HOUSES if "spooky_window" in h)
+    wx, wy, ww, wh = house["spooky_window"]
+    gx, gy = house["x"] + wx, house["wall_top"] + wy
+
+    cycle = int(t // FIGURE_EVERY)
+    into = t % FIGURE_EVERY
+    if into > FIGURE_STAYS:
+        return
+    figure = WINDOW_FIGURES[cycle % len(WINDOW_FIGURES)]
+    # Rise up from the bottom of the window, wait, then sink back down.
+    rise_time = 0.6
+    if into < rise_time:
+        shown = into / rise_time
+    elif into > FIGURE_STAYS - rise_time:
+        shown = (FIGURE_STAYS - into) / rise_time
+    else:
+        shown = 1.0
+    sink = round((1 - shown) * wh)
+
+    pixels = img.load()
+    colours = WINDOW_FIGURE_COLOURS
+    for row, line in enumerate(figure):
+        for col, letter in enumerate(line):
+            py = gy + row + sink
+            if letter != " " and py < gy + wh:       # stay inside the glass
+                pixels[gx + col, py] = colours[letter]
+
+
 def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     """Draw one frame of the scene and return it as an image."""
     img = _background(width, height).copy()
+    draw_window_figure(img, t)
+    draw_duo(img, t)
     if show_text:
         draw_countdown_text(img, f"{days} DAYS TO HALLOWEEN")
     return img

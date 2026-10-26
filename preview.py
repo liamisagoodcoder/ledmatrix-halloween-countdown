@@ -39,7 +39,7 @@ def led_look(frame, scale=6):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--days", type=int, default=6)
-    parser.add_argument("--seconds", type=float, default=14.0)
+    parser.add_argument("--seconds", type=float, default=19.0)
     parser.add_argument("--fps", type=int, default=20)
     parser.add_argument("--out", type=Path, default=HERE / "preview")
     args = parser.parse_args()
@@ -51,7 +51,7 @@ def main():
     args.out.mkdir(exist_ok=True)
     options = {}
     frames = [
-        led_look(draw_scene(i / args.fps, args.days, options=options))
+        led_look(draw_scene(i / args.fps, args.days, options=options, show_text=True))
         for i in range(int(args.seconds * args.fps))
     ]
     led_look(draw_scene(4.2, args.days, options=options)).save(args.out / "still.png")
