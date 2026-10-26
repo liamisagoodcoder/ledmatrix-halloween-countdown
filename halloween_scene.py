@@ -1,53 +1,167 @@
 """
-The Halloween night scene: harvest moon, twinkly sky, a street of houses with
-glowing windows, a picket fence with jack-o'-lanterns, and a twisty bare tree.
+The Halloween night scene: a sunset sky glowing orange on the horizon, a big
+moon with a twisty bare tree across it, and a street of three houses built
+from real materials -- a brick cottage, a two-storey stone house and a wooden
+Victorian with a turret -- with warm lit windows and jack-o'-lanterns.
 
 Built in stages (see README). Stage 1: the still scene.
 
-Like the Christmas plugin, characters are "pixel art" written as text: each
-letter is one LED, PALETTE says which colour a letter is, a space is
-see-through. Edit the letters to redraw something.
+How the houses are drawn: each house is described by a few numbers in HOUSES
+(where it is, how big, what it's made of, where the windows go). The code
+first paints a "material map" -- which pixel is brick, which is glass, which is
+roof -- then colours every pixel with that material's pattern (bricks with
+mortar lines, stone blocks, wooden boards, roof shingles). Change the numbers
+in HOUSES to move or resize anything.
 
 Designed for a 128x32 display (two 64x32 panels side by side).
 """
 
-import math
 import os
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-# ---------------------------------------------------------------------------
-# Colours (red, green, blue), 0-255. Black (0, 0, 0) is an LED switched off,
-# so most of the screen stays black and the bright bits pop.
-# ---------------------------------------------------------------------------
-PALETTE = {
-    # sky
-    "star": (150, 150, 200),
-    "moon": (255, 170, 50),
-    "moon_dark": (205, 115, 25),   # craters
-    "moon_glow": (45, 22, 4),      # faint halo around the moon
-    # houses
-    "H": (14, 14, 42),             # wall: deep navy
-    "P": (40, 16, 64),             # roof: dark purple
-    "p": (95, 40, 140),            # roof edge: brighter purple
-    "w": (255, 185, 60),           # lit window: warm yellow
-    "o": (255, 120, 20),           # lit window: orange
-    "D": (70, 30, 8),              # door
-    # street
-    "F": (60, 50, 90),             # fence
-    "grass": (15, 45, 15),         # a little green along the ground
-    # jack-o'-lantern
-    "O": (255, 100, 0),            # pumpkin orange
-    "Y": (255, 220, 60),           # candle glow through the carved face
-    "g": (40, 120, 20),            # stem
-    # tree
-    "tree": (62, 32, 82),          # bare tree: dark purple (black where it crosses the moon)
-    # text
-    "text": (255, 120, 20),
-}
-
 GROUND_Y = 28  # first row of the ground
+
+# ---------------------------------------------------------------------------
+# Colours (red, green, blue), 0-255. Black (0, 0, 0) is an LED switched off.
+# ---------------------------------------------------------------------------
+# The sky colour for each row, top to bottom: black up high, glowing orange
+# down at the horizon.
+SKY = [(0, 0, 0)] * 9 + [
+    (8, 1, 0), (16, 3, 0), (26, 5, 0), (38, 8, 0), (52, 12, 0),
+    (68, 16, 0), (84, 20, 0), (100, 24, 0), (118, 28, 0), (136, 32, 0),
+    (150, 36, 0), (165, 40, 0), (178, 44, 0), (190, 48, 0),
+    (200, 52, 0), (210, 56, 0), (215, 60, 0), (220, 64, 0), (225, 68, 0),
+]
+MOON = (255, 235, 160)
+MOON_DARK = (220, 190, 110)
+STAR_COLOURS = [(230, 230, 230), (255, 210, 50), (0, 200, 180)]
+TEXT = (110, 255, 30)
+GRASS = (20, 120, 20)
+
+# Materials. Each pixel of a house is one of these.
+NONE, BRICK, STONE, SIDING, SHINGLE, TRIM, GLASS, MULLION, DOOR, DOOR_PANEL, \
+    KNOB, STEP, SHUTTER, ROOF_EDGE, LAMP, FOUNDATION, DARK = range(17)
+SHADED = 100  # add to a material to draw it in shadow (under the roof edge)
+
+TRIM_COLOUR = (205, 190, 160)        # cream window frames and roof edges
+GLASS_TOP = (255, 225, 130)          # warm room light, a bit brighter up top
+GLASS_COLOUR = (255, 185, 70)
+MULLION_COLOUR = (60, 38, 18)        # the wooden bars across the windows
+DOOR_COLOUR = (115, 60, 25)
+DOOR_PANEL_COLOUR = (80, 40, 16)
+SHUTTER_COLOUR = (25, 55, 35)        # dark green
+STEP_COLOUR = (120, 115, 108)
+FOUNDATION_COLOUR = (65, 62, 58)
+ROOF_EDGE_COLOUR = (30, 28, 34)
+
+PUMPKIN = {"O": (255, 110, 0), "Y": (255, 230, 80), "g": (40, 160, 20)}
+BUSH = {"G": (25, 85, 30), "L": (45, 125, 40)}
+
+
+def _hash(*values):
+    """A repeatable 'random' number from some coordinates (same in, same out)."""
+    h = 2166136261
+    for v in values:
+        h = ((h ^ (v & 0xFFFFFFFF)) * 16777619) & 0xFFFFFFFF
+    return h
+
+
+# --- Material patterns. Each takes a pixel position and returns its colour. --
+def brick(x, y):
+    course = y // 3
+    if y % 3 == 2:                                   # mortar between rows
+        return (95, 82, 72)
+    if (x + (course % 2) * 2) % 5 == 0:              # mortar between bricks
+        return (95, 82, 72)
+    which = _hash(course, (x + (course % 2) * 2) // 5) % 3
+    return [(155, 55, 35), (130, 45, 30), (170, 68, 42)][which]
+
+
+def stone(x, y):
+    course = y // 3
+    offset = (course * 3) % 6
+    if y % 3 == 2 or (x + offset) % 6 == 5:          # mortar
+        return (50, 47, 44)
+    which = _hash(course, (x + offset) // 6) % 4
+    return [(135, 128, 116), (110, 105, 98), (150, 142, 128), (96, 93, 90)][which]
+
+
+def siding(x, y):
+    if y % 2 == 1:                                   # shadow under each board
+        return (48, 58, 64)
+    return (88, 104, 112)                            # painted slate-blue boards
+
+
+def shingle(x, y):
+    row = y % 2
+    if row == 1 and (x + (y // 2) % 2 * 2) % 4 == 0:
+        return (34, 31, 38)                          # gap between shingles
+    return (72, 66, 76) if row == 0 else (58, 54, 62)
+
+
+FLAT = {
+    TRIM: TRIM_COLOUR, MULLION: MULLION_COLOUR, DOOR: DOOR_COLOUR,
+    DOOR_PANEL: DOOR_PANEL_COLOUR, KNOB: (255, 210, 80), STEP: STEP_COLOUR,
+    SHUTTER: SHUTTER_COLOUR, ROOF_EDGE: ROOF_EDGE_COLOUR, LAMP: (255, 240, 170),
+    FOUNDATION: FOUNDATION_COLOUR, DARK: (0, 0, 0),
+}
+PATTERNS = {BRICK: brick, STONE: stone, SIDING: siding, SHINGLE: shingle}
+
+
+def colour_of(material, x, y, glass_top_rows):
+    shaded = material >= SHADED
+    if shaded:
+        material -= SHADED
+    if material == GLASS:
+        colour = GLASS_TOP if (x, y) in glass_top_rows else GLASS_COLOUR
+    elif material in PATTERNS:
+        colour = PATTERNS[material](x, y)
+    else:
+        colour = FLAT[material]
+    if shaded:
+        colour = tuple(int(c * 0.5) for c in colour)
+    return colour
+
+
+# ---------------------------------------------------------------------------
+# The houses. Numbers are pixels. "windows" are (x, y, glass width, glass
+# height) measured from the left edge of the house and the top of its wall.
+# ---------------------------------------------------------------------------
+HOUSES = [
+    {   # Brick cottage with a chimney.
+        "x": 1, "width": 24, "wall_top": 19, "wall": BRICK,
+        "roof": "side", "roof_rise": 6,
+        "chimney": {"x": 17, "width": 3, "top": 10},
+        "windows": [(3, 2, 3, 3), (18, 2, 3, 3)],
+        "door": {"x": 10, "width": 4, "height": 6},
+        "lamp": (15, 3),
+    },
+    {   # Two-storey stone house with shutters.
+        "x": 29, "width": 29, "wall_top": 15, "wall": STONE,
+        "roof": "side", "roof_rise": 6,
+        "windows": [(3, 2, 3, 3), (13, 2, 3, 3), (23, 2, 3, 3),
+                    (3, 8, 3, 3), (23, 8, 3, 3)],
+        "shutters": True,
+        "door": {"x": 12, "width": 5, "height": 7},
+        "lamp": (19, 7),
+    },
+    {   # Wooden Victorian with a front gable and a pointed turret.
+        "x": 63, "width": 20, "wall_top": 17, "wall": SIDING,
+        "roof": "front", "roof_rise": 8,
+        "attic_window": True,
+        "windows": [(2, 3, 3, 3), (15, 3, 3, 3)],
+        "door": {"x": 8, "width": 4, "height": 6},
+        "lamp": (13, 5),
+        "turret": {"x": 21, "width": 7, "top": 14, "rise": 5, "window": (2, 4, 3, 5)},
+    },
+]
+
+# Where the jack-o'-lanterns and bushes sit: (x, which picture)
+PUMPKINS = [(16, "small"), (22, "big"), (47, "small"), (76, "small"), (89, "big")]
+BUSHES = [(0, 6), (57, 5)]  # (x, width)
 
 JACK_O_LANTERN = [
     "  g  ",
@@ -56,10 +170,25 @@ JACK_O_LANTERN = [
     "OOOOO",
     " YYY ",
 ]
+BIG_JACK_O_LANTERN = [
+    "   g   ",
+    " OOOOO ",
+    "OOYOYOO",
+    "OOOOOOO",
+    "OYYYYYO",
+    " OOOOO ",
+]
+
+# A bat silhouette in front of the moon.
+BAT = [
+    "k   k",
+    "kk kk",
+    " kkk ",
+]
 
 # The bare, twisty tree, drawn as a list of branches:
-# (start x, start y), (end x, end y), thickness. It leans in from the left and
-# its branches reach across the moon, where they show as black cut-outs.
+# (start x, start y), (end x, end y), thickness. Black against the sunset,
+# and its branches cross the moon.
 TREE_BRANCHES = [
     ((100, 27), (101, 20), 3),   # trunk
     ((101, 20), (103, 14), 2),
@@ -81,20 +210,9 @@ TREE_BRANCHES = [
     ((98, 12), (95, 12), 1),
 ]
 
-# Each house: left edge, width, top of the wall, roof height, window spots
-# (x, y measured from the house's top-left wall corner) and the door column.
-HOUSES = [
-    {"x": 3, "width": 19, "wall_top": 17, "roof": 9, "door": 8,
-     "windows": [(2, 2, "w"), (14, 2, "o")]},
-    {"x": 28, "width": 25, "wall_top": 16, "roof": 8, "door": 11,
-     "windows": [(3, 2, "w"), (11, 2, "o"), (19, 2, "w"), (3, 7, "o"), (20, 7, "w")]},
-    {"x": 61, "width": 19, "wall_top": 17, "roof": 9, "door": 8,
-     "windows": [(2, 2, "o"), (14, 2, "w")]},
-]
-
 # Fixed star positions (kept clear of the countdown text in the top-left
 # corner and of the moon).
-STARS = [(100, 2), (104, 10), (99, 7), (24, 11), (57, 10), (86, 11), (90, 14), (2, 12), (125, 20)]
+STARS = [(100, 2), (104, 10), (99, 7), (125, 20), (92, 9), (60, 9), (24, 10)]
 
 MOON_CENTRE = (117, 9)
 MOON_RADIUS = 7
@@ -130,7 +248,7 @@ def _font(name, size):
 TEXT_FONT = _font("5x7.bdf", 7)  # a true pixel font: crisp at 7px tall
 
 
-def draw_sprite(img, picture, x, y, colour_for=None):
+def draw_sprite(img, picture, x, y, colours):
     """Copy a text picture onto the image with its top-left corner at (x, y)."""
     pixels = img.load()
     width, height = img.size
@@ -139,126 +257,213 @@ def draw_sprite(img, picture, x, y, colour_for=None):
             if letter == " ":
                 continue
             px, py = x + col, y + row
-            if not (0 <= px < width and 0 <= py < height):
-                continue
-            colour = colour_for(letter, col, row) if colour_for else None
-            pixels[px, py] = colour or PALETTE.get(letter, (255, 0, 255))
+            if 0 <= px < width and 0 <= py < height:
+                pixels[px, py] = colours.get(letter, (255, 0, 255))
 
 
 # ---------------------------------------------------------------------------
-# Layers, drawn back to front.
+# Building the material map for the houses.
+# ---------------------------------------------------------------------------
+def _window(draw, x, y, w, h, shutters=False):
+    """A window: cream frame, warm glass, a wooden cross, a sill underneath."""
+    draw.rectangle((x - 1, y - 1, x + w, y + h), fill=TRIM)
+    draw.rectangle((x, y, x + w - 1, y + h - 1), fill=GLASS)
+    if w >= 3:
+        draw.line((x + w // 2, y, x + w // 2, y + h - 1), fill=MULLION)
+    if h >= 3:
+        draw.line((x, y + h // 2, x + w - 1, y + h // 2), fill=MULLION)
+    draw.line((x - 2, y + h, x + w + 1, y + h), fill=TRIM)        # sill
+    if shutters:
+        draw.line((x - 2, y - 1, x - 2, y + h - 1), fill=SHUTTER)
+        draw.line((x + w + 1, y - 1, x + w + 1, y + h - 1), fill=SHUTTER)
+
+
+def _side_roof(draw, left, right, eave_y, rise):
+    """A roof seen from the side: a slanted band of shingles."""
+    draw.polygon([(left, eave_y), (left + rise, eave_y - rise),
+                  (right - rise, eave_y - rise), (right, eave_y)],
+                 fill=SHINGLE, outline=ROOF_EDGE)
+    draw.line((left, eave_y, right, eave_y), fill=TRIM)          # fascia board
+    draw.line((left + rise, eave_y - rise, right - rise, eave_y - rise), fill=ROOF_EDGE)
+
+
+def _front_gable(draw, x, w, top, rise, wall):
+    """A pointed gable facing us: a shingled roof edge round a triangle of wall."""
+    apex_x = x + (w - 1) / 2
+    draw.polygon([(x - 2, top), (apex_x, top - rise - 1), (x + w + 1, top)], fill=SHINGLE)
+    draw.polygon([(x + 1, top), (apex_x, top - rise + 2), (x + w - 2, top)], fill=wall)
+    # Cream trim along the outside edge of the gable.
+    draw.line((x - 2, top, apex_x, top - rise - 1), fill=TRIM)
+    draw.line((apex_x, top - rise - 1, x + w + 1, top), fill=TRIM)
+
+
+@lru_cache(maxsize=2)
+def _house_layer(width, height):
+    """Paint every house into a material map, then colour it in.
+
+    Done once and remembered, because the houses never change.
+    Returns (picture with see-through background, list of window glass boxes).
+    """
+    materials = Image.new("L", (width, height), NONE)
+    draw = ImageDraw.Draw(materials)
+    glass_boxes = []
+
+    for house in HOUSES:
+        x, w, top, wall = house["x"], house["width"], house["wall_top"], house["wall"]
+
+        if "turret" in house:
+            t = house["turret"]
+            tx, tw = x + t["x"], t["width"]
+            draw.rectangle((tx, t["top"], tx + tw - 1, GROUND_Y - 1), fill=wall)
+            apex_x = tx + (tw - 1) / 2
+            draw.polygon([(tx - 1, t["top"]), (apex_x, t["top"] - t["rise"] - 1),
+                          (tx + tw, t["top"])], fill=SHINGLE, outline=ROOF_EDGE)
+            draw.point((round(apex_x), t["top"] - t["rise"] - 2), fill=TRIM)  # finial
+            wx, wy, ww, wh = t["window"]
+            _window(draw, tx + wx, t["top"] + wy, ww, wh)
+            glass_boxes.append((tx + wx, t["top"] + wy, ww, wh))
+
+        if "chimney" in house:
+            c = house["chimney"]
+            cx = x + c["x"]
+            draw.rectangle((cx, c["top"], cx + c["width"] - 1, top - 1), fill=BRICK)
+            draw.line((cx - 1, c["top"], cx + c["width"], c["top"]), fill=TRIM)
+
+        # Wall.
+        draw.rectangle((x, top, x + w - 1, GROUND_Y - 1), fill=wall)
+
+        # Roof.
+        if house["roof"] == "side":
+            _side_roof(draw, x - 2, x + w + 1, top - 1, house["roof_rise"])
+            if "chimney" in house:   # the chimney stands in front of the roof
+                c = house["chimney"]
+                cx = x + c["x"]
+                draw.rectangle((cx, c["top"] + 1, cx + c["width"] - 1, top - 2), fill=BRICK)
+        else:
+            _front_gable(draw, x, w, top, house["roof_rise"], wall)
+            if house.get("attic_window"):
+                ax = x + w // 2 - 1
+                _window(draw, ax, top - 4, 2, 2)
+
+        # Shadow along the top of the wall, under the roof's edge.
+        draw.line((x, top, x + w - 1, top), fill=wall + SHADED)
+
+        # Windows.
+        for wx, wy, ww, wh in house["windows"]:
+            _window(draw, x + wx, top + wy, ww, wh, house.get("shutters", False))
+            glass_boxes.append((x + wx, top + wy, ww, wh))
+
+        # Door with a frame, panels, knob and a stone step.
+        d = house["door"]
+        dx, dw, dh = x + d["x"], d["width"], d["height"]
+        door_top = GROUND_Y - dh
+        draw.rectangle((dx - 1, door_top - 1, dx + dw, GROUND_Y - 1), fill=TRIM)
+        draw.rectangle((dx, door_top, dx + dw - 1, GROUND_Y - 1), fill=DOOR)
+        draw.rectangle((dx + 1, door_top + 1, dx + dw - 2, door_top + 2), fill=DOOR_PANEL)
+        draw.point((dx + dw - 1, door_top + dh // 2 + 1), fill=KNOB)
+        draw.line((dx - 2, GROUND_Y - 1, dx + dw + 1, GROUND_Y - 1), fill=STEP)
+
+        # Stone foundation along the bottom of the wall (not across the door).
+        for fx in range(x, x + w):
+            if not (dx - 2 <= fx <= dx + dw + 1):
+                draw.point((fx, GROUND_Y - 1), fill=FOUNDATION)
+
+        # Porch lamp beside the door.
+        lx, ly = house["lamp"]
+        draw.point((x + lx, top + ly), fill=LAMP)
+
+    # Now colour every pixel by its material.
+    glass_top_rows = {(gx + i, gy) for gx, gy, gw, gh in glass_boxes for i in range(gw)}
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    m = materials.load()
+    pixels = layer.load()
+    for py in range(height):
+        for px in range(width):
+            material = m[px, py]
+            if material != NONE:
+                pixels[px, py] = colour_of(material, px, py, glass_top_rows) + (255,)
+    return layer, tuple(glass_boxes)
+
+
+def window_glass_boxes(width=128, height=32):
+    """Where each window's glass is: (x, y, width, height). For later stages
+    (a spooky face appearing in a window)."""
+    return _house_layer(width, height)[1]
+
+
+# ---------------------------------------------------------------------------
+# The other layers.
 # ---------------------------------------------------------------------------
 def draw_sky(img):
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    for y, colour in enumerate(SKY[:height]):
+        draw.line((0, y, width - 1, y), fill=colour)
+
     pixels = img.load()
-    for x, y in STARS:
-        pixels[x, y] = PALETTE["star"]
+    for i, (x, y) in enumerate(STARS):
+        pixels[x, y] = STAR_COLOURS[i % len(STAR_COLOURS)]
 
     cx, cy = MOON_CENTRE
-    draw = ImageDraw.Draw(img)
     r = MOON_RADIUS
-    draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill=PALETTE["moon_glow"])
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=PALETTE["moon"])
-    # A few craters.
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=MOON)
     for dx, dy, size in ((-3, -2, 2), (2, 2, 2), (3, -4, 1), (-2, 4, 1)):
-        draw.ellipse((cx + dx, cy + dy, cx + dx + size - 1, cy + dy + size - 1), fill=PALETTE["moon_dark"])
-
-
-def draw_house(img, house):
-    draw = ImageDraw.Draw(img)
-    x, w, top, rise = house["x"], house["width"], house["wall_top"], house["roof"]
-    # Wall.
-    draw.rectangle((x, top, x + w - 1, GROUND_Y - 1), fill=PALETTE["H"])
-    # Roof: a triangle that overhangs the wall by one pixel each side, with a
-    # brighter edge so the shape reads against the black sky.
-    apex = (x + (w - 1) / 2, top - rise)
-    roof = [(x - 1, top - 1), apex, (x + w, top - 1)]
-    draw.polygon(roof, fill=PALETTE["P"], outline=PALETTE["p"])
-    # Windows (3x3) and door (3x5).
-    for wx, wy, colour in house["windows"]:
-        draw.rectangle((x + wx, top + wy, x + wx + 2, top + wy + 2), fill=PALETTE[colour])
-    dx = x + house["door"]
-    draw.rectangle((dx, GROUND_Y - 5, dx + 2, GROUND_Y - 1), fill=PALETTE["D"])
-
-
-def door_gaps():
-    """Columns where the fence opens up for each house's front path."""
-    gaps = []
-    for house in HOUSES:
-        door = house["x"] + house["door"]
-        gaps.append((door - 4, door + 6))
-    return gaps
-
-
-def draw_fence(img):
-    draw = ImageDraw.Draw(img)
-    width = img.size[0]
-    top = GROUND_Y - 4
-    gaps = door_gaps()
-    fence_end = 93  # stop before the tree
-
-    def in_gap(x):
-        return any(a <= x <= b for a, b in gaps)
-
-    for x in range(0, fence_end):
-        if in_gap(x):
-            continue
-        # Two rails ...
-        img.load()[x, top + 1] = PALETTE["F"]
-        img.load()[x, top + 3] = PALETTE["F"]
-        # ... and a pointed picket every 3 columns.
-        if x % 3 == 0:
-            draw.line((x, top, x, GROUND_Y - 1), fill=PALETTE["F"])
-            if top - 1 >= 0:
-                img.load()[x, top - 1] = PALETTE["F"]
-
-
-def draw_porch_pumpkins(img):
-    """A jack-o'-lantern on each front path, beside the door."""
-    for house in HOUSES:
-        door = house["x"] + house["door"]
-        draw_sprite(img, JACK_O_LANTERN, door + 4, GROUND_Y - len(JACK_O_LANTERN) + 1)
+        draw.ellipse((cx + dx, cy + dy, cx + dx + size - 1, cy + dy + size - 1), fill=MOON_DARK)
+    draw_sprite(img, BAT, cx - 4, cy - 2, {"k": (0, 0, 0)})
 
 
 def draw_tree(img):
-    mask = Image.new("1", img.size, 0)
-    mask_draw = ImageDraw.Draw(mask)
+    draw = ImageDraw.Draw(img)
     for start, end, thickness in TREE_BRANCHES:
-        mask_draw.line((start, end), fill=1, width=thickness)
+        draw.line((start, end), fill=(0, 0, 0), width=thickness)
 
-    m = mask.load()
-    pixels = img.load()
-    cx, cy = MOON_CENTRE
-    width, height = img.size
-    for y in range(height):
-        for x in range(width):
-            if m[x, y]:
-                on_moon = (x - cx) ** 2 + (y - cy) ** 2 <= (MOON_RADIUS + 0.5) ** 2
-                pixels[x, y] = (0, 0, 0) if on_moon else PALETTE["tree"]
+
+def draw_bushes(img):
+    draw = ImageDraw.Draw(img)
+    for x, w in BUSHES:
+        draw.rectangle((x, GROUND_Y - 3, x + w - 1, GROUND_Y - 1), fill=BUSH["G"])
+        draw.line((x + 1, GROUND_Y - 4, x + w - 2, GROUND_Y - 4), fill=BUSH["L"])
+        draw.point((x + 2, GROUND_Y - 3), fill=BUSH["L"])
+        draw.point((x + w - 3, GROUND_Y - 3), fill=BUSH["L"])
+
+
+def draw_pumpkins(img):
+    for x, size in PUMPKINS:
+        picture = BIG_JACK_O_LANTERN if size == "big" else JACK_O_LANTERN
+        draw_sprite(img, picture, x, GROUND_Y - len(picture) + 1, PUMPKIN)
 
 
 def draw_ground(img):
-    width, height = img.size
+    width, _ = img.size
     draw = ImageDraw.Draw(img)
-    draw.line((0, GROUND_Y, width - 1, GROUND_Y), fill=PALETTE["grass"])
+    draw.line((0, GROUND_Y, width - 1, GROUND_Y), fill=GRASS)
+    draw.line((0, GROUND_Y + 1, width - 1, GROUND_Y + 1), fill=tuple(c // 3 for c in GRASS))
 
 
 def draw_countdown_text(img, text):
     draw = ImageDraw.Draw(img)
     draw.fontmode = "1"
     left, top, _, _ = TEXT_FONT.getbbox(text)
-    draw.text((1 - left, 1 - top), text, font=TEXT_FONT, fill=PALETTE["text"])
+    draw.text((1 - left, 1 - top), text, font=TEXT_FONT, fill=TEXT)
+
+
+@lru_cache(maxsize=2)
+def _background(width, height):
+    """Everything that never moves, drawn once and remembered."""
+    img = Image.new("RGB", (width, height), (0, 0, 0))
+    draw_sky(img)
+    draw_tree(img)
+    houses, _ = _house_layer(width, height)
+    img.paste(houses, (0, 0), houses)
+    draw_bushes(img)
+    draw_pumpkins(img)
+    draw_ground(img)
+    return img
 
 
 def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     """Draw one frame of the scene and return it as an image."""
-    img = Image.new("RGB", (width, height), (0, 0, 0))
-    draw_sky(img)
-    for house in HOUSES:
-        draw_house(img, house)
-    draw_tree(img)
-    draw_fence(img)
-    draw_porch_pumpkins(img)
-    draw_ground(img)
+    img = _background(width, height).copy()
     if show_text:
         draw_countdown_text(img, f"{days} DAYS TO HALLOWEEN")
     return img
