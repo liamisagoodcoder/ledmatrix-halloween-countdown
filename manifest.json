@@ -1,7 +1,7 @@
 {
   "id": "halloween-countdown",
   "name": "Halloween Countdown",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "author": "liamisagoodcoder",
   "description": "Animated Halloween street at sunset: a pumpkin-head kid and a ghost go trick-or-treating past real-looking houses, with bats, a witch across the moon and other surprises. Counts the days to Halloween. Designed for 128x32 (two 64x32 panels).",
   "category": "holiday",

@@ -23,6 +23,7 @@ from src.plugin_system.base_plugin import BasePlugin
 from halloween_scene import draw_scene
 
 DESIGN_WIDTH, DESIGN_HEIGHT = 128, 32   # the scene is drawn for two 64x32 panels
+MAX_FRAME_GAP = 1.0   # seconds; a longer gap between frames means we were off screen
 
 
 def _colour(value, default):
@@ -43,7 +44,12 @@ class HalloweenCountdownPlugin(BasePlugin):
         # Ask the display loop to call display() many times a second instead
         # of once a second, so everything moves smoothly.
         self.needs_high_fps = True
-        self._clock_start = time.monotonic()
+        # The scene has its own clock, which only runs while the scene is on
+        # screen. That way the walk, the window figures and the surprises
+        # carry on where they left off each time the plugin comes round in
+        # the rotation, instead of happening unseen while other plugins show.
+        self._scene_time = 0.0
+        self._last_tick = None
         self._last_frame = 0.0
         self._apply_config()
 
@@ -114,8 +120,14 @@ class HalloweenCountdownPlugin(BasePlugin):
             return
         self._last_frame = now
 
-        scene_time = (now - self._clock_start) * self.speed
-        frame = draw_scene(scene_time, self.days_until_halloween(),
+        if self._last_tick is not None:
+            gap = now - self._last_tick
+            # A long gap means we were off screen: don't count that time.
+            if gap < MAX_FRAME_GAP:
+                self._scene_time += gap * self.speed
+        self._last_tick = now
+
+        frame = draw_scene(self._scene_time, self.days_until_halloween(),
                            DESIGN_WIDTH, DESIGN_HEIGHT, self.scene_options,
                            show_text=self.show_countdown)
         self._show(frame)
