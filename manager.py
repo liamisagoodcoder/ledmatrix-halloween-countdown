@@ -25,6 +25,15 @@ from halloween_scene import draw_scene
 DESIGN_WIDTH, DESIGN_HEIGHT = 128, 32   # the scene is drawn for two 64x32 panels
 
 
+def _colour(value, default):
+    """Turn a [r, g, b] setting into a colour, or use the default if it's bad."""
+    try:
+        r, g, b = (max(0, min(255, int(c))) for c in value)
+        return (r, g, b)
+    except (TypeError, ValueError):
+        return default
+
+
 class HalloweenCountdownPlugin(BasePlugin):
     """Animated Halloween countdown."""
 
@@ -44,7 +53,15 @@ class HalloweenCountdownPlugin(BasePlugin):
         self.speed = max(0.25, min(3.0, float(cfg.get("animation_speed", 1.0))))
         self.scene_options = {
             "surprise_every": max(15, min(300, int(cfg.get("surprise_every_seconds", 30)))),
+            "glow": cfg.get("sunset_glow", "full"),
+            "fog": max(0, min(200, int(cfg.get("fog", 100)))) / 100,
+            "leaves": max(0, min(20, int(cfg.get("leaves", 10)))),
+            "text_colour": _colour(cfg.get("countdown_color"), (255, 120, 10)),
         }
+        # Scene brightness, as a lookup table that scales every colour value.
+        brightness = max(10, min(100, int(cfg.get("brightness", 100)))) / 100
+        self._brightness_table = None if brightness >= 1 else [
+            int(v * brightness) for v in range(256)] * 3
         fps = max(5, min(60, int(cfg.get("animation_fps", 30))))
         self._frame_interval = 1.0 / fps
 
@@ -117,5 +134,7 @@ class HalloweenCountdownPlugin(BasePlugin):
             # A smaller display shows the middle of the scene.
             canvas.paste(frame, ((width - frame.width) // 2, (height - frame.height) // 2))
             frame = canvas
+        if self._brightness_table:
+            frame = frame.point(self._brightness_table)
         self.display_manager.image.paste(frame, (0, 0))
         self.display_manager.update_display()

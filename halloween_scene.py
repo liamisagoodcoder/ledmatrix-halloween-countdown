@@ -407,11 +407,15 @@ def window_glass_boxes(width=128, height=32):
 # ---------------------------------------------------------------------------
 # The other layers.
 # ---------------------------------------------------------------------------
-def draw_sky(img):
+GLOW_STRENGTH = {"off": 0.0, "soft": 0.5, "full": 1.0}
+
+
+def draw_sky(img, glow="full"):
     draw = ImageDraw.Draw(img)
     width, height = img.size
+    strength = GLOW_STRENGTH.get(glow, 1.0)
     for y, colour in enumerate(SKY[:height]):
-        draw.line((0, y, width - 1, y), fill=colour)
+        draw.line((0, y, width - 1, y), fill=tuple(int(c * strength) for c in colour))
 
     cx, cy = MOON_CENTRE
     r = MOON_RADIUS
@@ -421,10 +425,23 @@ def draw_sky(img):
     draw_sprite(img, BAT, cx - 4, cy - 2, {"k": (0, 0, 0)})
 
 
-def draw_tree(img):
-    draw = ImageDraw.Draw(img)
+def draw_tree(img, glow="full"):
+    # Black against the sunset. With no sunset behind it a black tree would
+    # vanish, so it's drawn in dark bark instead (still black across the moon).
+    colour = (0, 0, 0) if glow != "off" else (55, 42, 38)
+    mask = Image.new("1", img.size, 0)
+    mask_draw = ImageDraw.Draw(mask)
     for start, end, thickness in TREE_BRANCHES:
-        draw.line((start, end), fill=(0, 0, 0), width=thickness)
+        mask_draw.line((start, end), fill=1, width=thickness)
+    m = mask.load()
+    pixels = img.load()
+    cx, cy = MOON_CENTRE
+    width, height = img.size
+    for y in range(height):
+        for x in range(width):
+            if m[x, y]:
+                on_moon = (x - cx) ** 2 + (y - cy) ** 2 <= (MOON_RADIUS + 0.5) ** 2
+                pixels[x, y] = (0, 0, 0) if on_moon else colour
 
 
 def draw_bushes(img):
@@ -489,20 +506,22 @@ def draw_ground(img):
     draw.line((0, GROUND_Y + 1, width - 1, GROUND_Y + 1), fill=tuple(c // 3 for c in GRASS))
 
 
-def draw_countdown_text(img, text):
+def draw_countdown_text(img, text, colour=TEXT):
+    colour = tuple(colour)
+    shadow = tuple(int(c * 0.35) for c in colour)
     draw = ImageDraw.Draw(img)
     draw.fontmode = "1"
     left, top, _, _ = TEXT_FONT.getbbox(text)
-    draw.text((2 - left, 2 - top), text, font=TEXT_FONT, fill=TEXT_SHADOW)
-    draw.text((1 - left, 1 - top), text, font=TEXT_FONT, fill=TEXT)
+    draw.text((2 - left, 2 - top), text, font=TEXT_FONT, fill=shadow)
+    draw.text((1 - left, 1 - top), text, font=TEXT_FONT, fill=colour)
 
 
 @lru_cache(maxsize=2)
-def _background(width, height):
+def _background(width, height, glow="full"):
     """Everything that never moves, drawn once and remembered."""
     img = Image.new("RGB", (width, height), (0, 0, 0))
-    draw_sky(img)
-    draw_tree(img)
+    draw_sky(img, glow)
+    draw_tree(img, glow)
     houses, _ = _house_layer(width, height)
     img.paste(houses, (0, 0), houses)
     draw_bushes(img)
@@ -835,15 +854,19 @@ _LEAVES = [
     (7, 27, 9, 5.0, 0), (31, 25, 13, 6.3, 1), (52, 28, 7, 4.4, 2), (70, 26, 11, 7.1, 3),
     (88, 24, 15, 5.6, 4), (104, 27, 8, 6.8, 0), (119, 25, 12, 4.9, 2), (15, 22, 10, 6.0, 1),
     (62, 21, 14, 5.2, 4), (97, 23, 9, 7.6, 3),
+    (24, 26, 12, 6.6, 2), (45, 23, 10, 5.3, 0), (79, 27, 13, 4.7, 1), (112, 22, 9, 6.2, 4),
+    (3, 24, 11, 7.3, 3), (38, 27, 8, 5.8, 1), (83, 22, 14, 6.9, 0), (126, 26, 10, 4.6, 2),
+    (57, 25, 12, 7.0, 3), (92, 21, 11, 5.5, 4),
 ]
+DEFAULT_LEAVES = 10
 
 
-def draw_leaves(img, t):
+def draw_leaves(img, t, count=DEFAULT_LEAVES):
     pixels = img.load()
     width, height = img.size
     lap = width + 10
     strength = gust(t)
-    for i, (start, rest_y, lift, flutter, colour_index) in enumerate(_LEAVES):
+    for i, (start, rest_y, lift, flutter, colour_index) in enumerate(_LEAVES[:count]):
         lag = i * 0.15                                    # leaves don't all move at once
         travel = CALM_SPEED * t + GUST_SPEED * wind_travel(t - lag)
         x = int((start + travel) % lap) - 5
@@ -863,8 +886,11 @@ FOG_TOP = 24          # fog reaches up to this row at its thickest
 FOG_SPEED = 2.5       # pixels per second, drifting right
 
 
-def draw_fog(img, t):
-    """Low patchy fog along the bottom, see-through, drifting slowly."""
+def draw_fog(img, t, thickness=1.0):
+    """Low patchy fog along the bottom, see-through, drifting slowly.
+    thickness: 1.0 is normal, 0 turns it off."""
+    if thickness <= 0:
+        return
     pixels = img.load()
     width, height = img.size
     for x in range(width):
@@ -875,7 +901,7 @@ def draw_fog(img, t):
         depth = height - FOG_TOP
         for y in range(FOG_TOP, height):
             # Thicker near the ground, fading out as it rises.
-            amount = density * ((y - FOG_TOP + 1) / depth) * 0.45
+            amount = min(0.9, density * ((y - FOG_TOP + 1) / depth) * 0.45 * thickness)
             if amount <= 0.02:
                 continue
             r, g, b = pixels[x, y]
@@ -1127,7 +1153,7 @@ def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     kind = event["kind"] if event else None
     into = t - event["start"] if event else 0.0
 
-    img = _background(width, height).copy()
+    img = _background(width, height, options.get("glow", "full")).copy()
     draw_twinkling_stars(img, t)
     if kind == "witch":
         draw_witch(img, into)
@@ -1144,8 +1170,8 @@ def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
     if kind == "treat":
         top, _ = kid_top(t, timeline, event)
         draw_candy(img, HOUSES[event["house"]], into, timeline.kid_x(t), top)
-    draw_fog(img, t)
-    draw_leaves(img, t)
+    draw_fog(img, t, options.get("fog", 1.0))
+    draw_leaves(img, t, int(options.get("leaves", DEFAULT_LEAVES)))
     if kind == "gust":
         draw_gust_wave(img, into)
     if kind == "bats":
@@ -1154,7 +1180,7 @@ def draw_scene(t, days, width=128, height=32, options=None, show_text=False):
         # Halloween night: a flock of bats every 10 seconds.
         draw_bats(img, t % 10.0, count=5)
     if show_text:
-        draw_countdown_text(img, countdown_message(days))
+        draw_countdown_text(img, countdown_message(days), options.get("text_colour", TEXT))
     return img
 
 

@@ -21,6 +21,45 @@
       "default": true,
       "description": "Show \"X DAYS TO HALLOWEEN\" in the top-left corner (HAPPY HALLOWEEN on the day)"
     },
+    "brightness": {
+      "type": "integer",
+      "x-widget": "slider",
+      "default": 100,
+      "minimum": 10,
+      "maximum": 100,
+      "description": "Brightness of this scene (%), on top of LEDMatrix's overall brightness. Lower it if the sunset is too bright next to your other plugins."
+    },
+    "sunset_glow": {
+      "type": "string",
+      "enum": ["full", "soft", "off"],
+      "default": "full",
+      "description": "The orange sunset glow behind the houses: full, soft (half as bright) or off (black night sky)"
+    },
+    "fog": {
+      "type": "integer",
+      "x-widget": "slider",
+      "default": 100,
+      "minimum": 0,
+      "maximum": 200,
+      "description": "How thick the low fog is (%). 0 turns it off; 200 is extra thick."
+    },
+    "leaves": {
+      "type": "integer",
+      "x-widget": "slider",
+      "default": 10,
+      "minimum": 0,
+      "maximum": 20,
+      "description": "How many leaves blow across the street (0 turns them off)"
+    },
+    "countdown_color": {
+      "type": "array",
+      "x-widget": "color-picker",
+      "items": {"type": "integer", "minimum": 0, "maximum": 255},
+      "minItems": 3,
+      "maxItems": 3,
+      "default": [255, 120, 10],
+      "description": "Colour of the countdown text (default: pumpkin orange)"
+    },
     "animation_speed": {
       "type": "number",
       "default": 1.0,

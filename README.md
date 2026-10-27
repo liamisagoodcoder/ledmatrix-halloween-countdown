@@ -39,6 +39,11 @@ Designed for **128x32** (two 64x32 panels chained).
 |---|---|---|
 | `display_duration` | 30 | Seconds on screen each rotation |
 | `show_countdown` | on | Show the days-to-Halloween text |
+| `brightness` | 100 | Brightness of this scene (%), on top of LEDMatrix's overall brightness |
+| `sunset_glow` | full | The orange glow behind the houses: full, soft or off |
+| `fog` | 100 | Fog thickness (%): 0 = off, 200 = extra thick |
+| `leaves` | 10 | How many leaves blow across (0 = off, up to 20) |
+| `countdown_color` | orange | Colour of the countdown text |
 | `animation_speed` | 1.0 | How fast everything moves (0.5 = half, 2 = double) |
 | `surprise_every_seconds` | 30 | Roughly how often a surprise happens |
 | `animation_fps` (advanced) | 30 | Frames per second; lower it if the Pi struggles |
